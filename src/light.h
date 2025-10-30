@@ -16,6 +16,11 @@ class Light {
   glm::vec4 m_spe;
   glm::vec4 m_pos;
   NodePtr m_reference;
+  // Spotlight and attenuation parameters
+  float m_spotCutoffDeg;   // cutoff angle in degrees
+  float m_spotExponent;    // focus exponent
+  glm::vec3 m_att;         // (constant, linear, quadratic)
+  int m_useSpotOverride;   // -1 = auto, 0 = force off, 1 = force on
 protected:
   Light (float x, float y, float z, float w, const std::string& space);
 public:
@@ -27,6 +32,10 @@ public:
   void SetSpecular (float r, float g, float b);
   void SetReference (NodePtr reference);
   NodePtr GetReference () const;
+  // Spotlight/attenuation controls
+  void SetSpotlight (float cutoffDegrees, float exponent);
+  void SetAttenuation (float constant, float linear, float quadratic);
+  void SetUseSpot (bool enable); // force enable/disable; call with no effect to return to auto
   void Load (StatePtr st) const;
 };
 

@@ -10,6 +10,7 @@ out vec4 color;
 
 uniform sampler2D decal;
 uniform sampler2D roughness; // roughness map (R channel)
+uniform float roughFactor;   // multiplier to amplify/attenuate roughness (debug/control)
 
 uniform vec4 lpos;  // light pos in eye space
 uniform vec4 lamb;
@@ -59,8 +60,8 @@ void main (void)
   float ndotl = max(0.0, dot(N, L));
   float vis = attenuation * spot;
 
-  // Roughness mapping
-  float rough = clamp(texture(roughness, f.uv).r, 0.0, 1.0);
+  // Roughness mapping (scaled for visibility via roughFactor)
+  float rough = clamp(roughFactor * texture(roughness, f.uv).r, 0.0, 1.0);
   float gloss = 1.0 - rough; // 0 = fully rough, 1 = fully glossy
   float mshi_eff = mix(8.0, 256.0, gloss);
 

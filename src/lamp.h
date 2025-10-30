@@ -1,17 +1,11 @@
 #pragma once
-
+#include <glm/glm.hpp>
 #include "node.h"
 #include "appearance.h"
 #include "shape.h"
-#include <glm/glm.hpp>
+#include "light.h"
 
-// Build a desk lamp: base + two cylindrical arms + conical head.
-// Parameters:
-// - basePos: translation applied to the lamp group (relative to table center)
-// - topY: table top Y position (used to place base atop the table)
-// - headTargetXY: target point (x,y) in the XY plane the head should point to
-// - appearances: metal material, white material, and a white decal texture
-// - shapes: references to cylinder and cone shapes (reused VAOs)
+// Overload com target e materiais/textura explícitos
 NodePtr MakeLamp(const glm::vec3& basePos,
                  float topY,
                  const glm::vec2& headTargetXY,
@@ -21,16 +15,13 @@ NodePtr MakeLamp(const glm::vec3& basePos,
                  ShapePtr cylinder,
                  ShapePtr cone);
 
-// Convenience overload with sensible defaults:
-// - Creates default metal/white materials and a white decal internally
-// - Points the head slightly forward by default
+// Overload simples (defaults internos)
 NodePtr MakeLamp(const glm::vec3& basePos,
                  float topY,
                  ShapePtr cylinder,
                  ShapePtr cone);
 
-// Short overload that also attaches a Light to the lamp head (apex) so that
-// lpos/ldir come from the lamp's cúpula; the light is transformed with the head node.
+// Overload com luz acoplada ao cabeçote
 NodePtr MakeLamp(const glm::vec3& basePos,
                  float topY,
                  ShapePtr cylinder,

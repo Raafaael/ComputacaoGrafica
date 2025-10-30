@@ -41,9 +41,33 @@ static ScenePtr scene;
 static Camera3DPtr camera;
 static ArcballPtr arcball;
 static ShaderPtr g_shader;
+static LightPtr g_light;          // spotlight on lamp head
 static bool g_clipEnabled = false;    // desable clip by default
 static bool g_clipKeepAbove = true;  // for table-plane: keep ABOVE the tabletop
 static float g_topY = 1.1f;          // table top height
+// Fog controls (linear fog)
+static bool  g_fogEnabled = true;
+static float g_fogStart   = 3.0f;
+static float g_fogEnd     = 8.0f;
+// Roughness visualization/control
+static float g_roughFactor = 1.0f; // 1.0 = as-authored; >1 amplifies roughness, <1 reduces
+// Spotlight controls (desk lamp)
+static float g_spotCutoffDeg = 14.0f; // cone half-angle in degrees
+static float g_spotExponent  = 32.0f; // focus
+
+static void UpdateFogUniforms()
+{
+  if (!g_shader) return;
+  g_shader->UseProgram();
+  // Disable fog by collapsing the range
+  if (!g_fogEnabled) {
+    g_shader->SetUniform("fogStart", 1e9f);
+    g_shader->SetUniform("fogEnd",   1e9f + 1.0f);
+  } else {
+    g_shader->SetUniform("fogStart", g_fogStart);
+    g_shader->SetUniform("fogEnd",   g_fogEnd);
+  }
+}
 
 static void initialize (void)
 {
@@ -71,6 +95,9 @@ static void initialize (void)
 
   // Light that will be attached to the lamp head (use world space; shader uses "camera" and will convert)
   LightPtr light = Light::Make(-1.5f, 2.5f, 2.2f, 1.0f, "world");
+  g_light = light; // keep handle for runtime tweaks
+  // Initialize spotlight parameters to match defaults used in lamp helper
+  g_light->SetSpotlight(g_spotCutoffDeg, g_spotExponent);
 
   // Materials (colors) and their glossiness
   MaterialPtr mat_white  = Material::Make(1.0f,1.0f,1.0f);
@@ -107,8 +134,9 @@ static void initialize (void)
   // Set fog defaults (linear fog)
   shader->UseProgram();
   shader->SetUniform("fogColor", glm::vec3(1.0f, 1.0f, 1.0f)); // match background
-  shader->SetUniform("fogStart", 3.0f);
-  shader->SetUniform("fogEnd",   8.0f);
+  UpdateFogUniforms();
+  // Roughness control default
+  shader->SetUniform("roughFactor", g_roughFactor);
   // Initialize clipping (no planes active by default)
   shader->SetUniform("clipCount", 0);
   std::vector<glm::vec4> clipPlanes(4, glm::vec4(0,0,0,0));
@@ -218,6 +246,37 @@ static void keyboard (GLFWwindow* window, int key, int scancode, int action, int
   if (key == GLFW_KEY_B && action == GLFW_PRESS) {
     g_clipKeepAbove = !g_clipKeepAbove;
     printf("Clip keep %s table\n", g_clipKeepAbove ? "ABOVE" : "BELOW");
+  }
+  // Roughness factor controls: K (down), L (up), R (reset)
+  if ((key == GLFW_KEY_K) && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
+    g_roughFactor = std::max(0.10f, g_roughFactor - 0.10f);
+    if (g_shader) { g_shader->UseProgram(); g_shader->SetUniform("roughFactor", g_roughFactor); }
+    printf("roughFactor = %.2f\n", g_roughFactor);
+  }
+  if ((key == GLFW_KEY_L) && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
+    g_roughFactor = std::min(3.00f, g_roughFactor + 0.10f);
+    if (g_shader) { g_shader->UseProgram(); g_shader->SetUniform("roughFactor", g_roughFactor); }
+    printf("roughFactor = %.2f\n", g_roughFactor);
+  }
+  if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+    g_roughFactor = 1.0f;
+    if (g_shader) { g_shader->UseProgram(); g_shader->SetUniform("roughFactor", g_roughFactor); }
+    printf("roughFactor reset to 1.00\n");
+  }
+  if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+    g_fogEnabled = !g_fogEnabled;
+    UpdateFogUniforms();
+    printf("Fog %s\n", g_fogEnabled ? "ON" : "OFF");
+  }
+  if ((key == GLFW_KEY_KP_ADD || key == GLFW_KEY_EQUAL) && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
+    g_fogEnd = std::min(g_fogEnd + 0.5f, 50.0f);
+    UpdateFogUniforms();
+    printf("Fog range: [%.2f, %.2f]\n", g_fogStart, g_fogEnd);
+  }
+  if ((key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_MINUS) && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
+    g_fogEnd = std::max(g_fogEnd - 0.5f, g_fogStart + 0.5f);
+    UpdateFogUniforms();
+    printf("Fog range: [%.2f, %.2f]\n", g_fogStart, g_fogEnd);
   }
 }
 

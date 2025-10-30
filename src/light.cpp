@@ -22,7 +22,11 @@ Light::Light (float x, float y, float z, float w, const std::string& space)
   m_dif{0.7f,0.7f,0.7f,1.0f},
   m_spe{1.0f,1.0f,1.0f,1.0f},
   m_pos{x,y,z,w},
-  m_reference(nullptr)
+  m_reference(nullptr),
+  m_spotCutoffDeg(14.0f),   // tighter beam for a desk lamp
+  m_spotExponent(32.0f),    // focused center
+  m_att(1.0f, 0.22f, 0.20f),// noticeable falloff at scene scale
+  m_useSpotOverride(-1)
 {
 }
 
@@ -69,6 +73,22 @@ void Light::SetPosition (float x, float y, float z, float w)
   m_pos[3] = w;
 }
 
+void Light::SetSpotlight (float cutoffDegrees, float exponent)
+{
+  m_spotCutoffDeg = cutoffDegrees;
+  m_spotExponent  = exponent;
+}
+
+void Light::SetAttenuation (float constant, float linear, float quadratic)
+{
+  m_att = glm::vec3(constant, linear, quadratic);
+}
+
+void Light::SetUseSpot (bool enable)
+{
+  m_useSpotOverride = enable ? 1 : 0;
+}
+
 void Light::Load (StatePtr st) const
 {
   ShaderPtr shd = st->GetShader();
@@ -95,16 +115,19 @@ void Light::Load (StatePtr st) const
   // Otherwise default to -Z (camera forward) in the chosen space.
   glm::vec3 ldir(0.0f, 0.0f, -1.0f);
   if (GetReference()) {
-    glm::vec4 d = M * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+    // Aim along the head's -Y axis (from apex toward the cone opening / table)
+    glm::vec4 d = M * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f);
     ldir = glm::normalize(glm::vec3(d));
   }
   shd->SetUniform("ldir", glm::vec4(ldir, 0.0f)); // vec4 overload, fragment uses xyz
-  // Enable spotlight only when we have a positional light and a reference
+  // Enable spotlight only when we have a positional light and a reference,
+  // unless overridden by user.
   int useSpot = (pos.w != 0.0f && GetReference() != nullptr) ? 1 : 0;
+  if (m_useSpotOverride != -1) useSpot = m_useSpotOverride;
   shd->SetUniform("useSpot", useSpot);
-  // Reasonable defaults (degrees -> cosine cutoff)
-  shd->SetUniform("spotCutoff", cosf(18.0f * 3.14159265f/180.0f));
-  shd->SetUniform("spotExponent", 16.0f);
+  // Spotlight params (degrees -> cosine cutoff)
+  shd->SetUniform("spotCutoff", cosf(m_spotCutoffDeg * 3.14159265f/180.0f));
+  shd->SetUniform("spotExponent", m_spotExponent);
   // Distance attenuation (constant, linear, quadratic)
-  shd->SetUniform("att", glm::vec3(1.0f, 0.15f, 0.05f));
+  shd->SetUniform("att", m_att);
 }
