@@ -22,6 +22,8 @@ TexCubePtr TexCube::Make (const std::string& varname, const std::string& filenam
 
 TexCube::TexCube (const std::string& varname, const std::string& filename)
 {
+  // store the sampler uniform name used in the shader (e.g., "envMap")
+  m_varname = varname;
   ImagePtr img = Image::Make(filename);
 
   glGenTextures(1,&m_tex);
@@ -32,20 +34,28 @@ TexCube::TexCube (const std::string& varname, const std::string& filename)
   int h = img->GetHeight() / 3;
   int x[] = {2*w,  0,  w,  w,  w,3*w};
   int y[] = {  h,  h,2*h,  0,  h,  h};
+  // Swap top/bottom mapping to match atlas orientation (fix inverted floor/ceiling)
   GLenum face[] = {
     GL_TEXTURE_CUBE_MAP_POSITIVE_X,  // right
     GL_TEXTURE_CUBE_MAP_NEGATIVE_X,  // left
-    GL_TEXTURE_CUBE_MAP_POSITIVE_Y,  // top
-    GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,  // bottom
+    GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,  // bottom (was +Y)
+    GL_TEXTURE_CUBE_MAP_POSITIVE_Y,  // top    (was -Y)
     GL_TEXTURE_CUBE_MAP_POSITIVE_Z,  // front
     GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,  // back
   };
-  unsigned char* subimg = new unsigned char[w*h*img->GetNChannels()];
+  int nc = img->GetNChannels();
+  unsigned char* subimg = new unsigned char[w*h*nc];
+  const unsigned char* data = img->GetData();
+  int fullW = img->GetWidth();
+  // Extract without vertical flip to preserve original atlas orientation
   for (int i=0; i<6; ++i) {
-    img->ExtractSubimage(x[i],y[i],w,h,subimg);
-    glTexImage2D(face[i],0,GL_RGB,w,h,0,
-                 img->GetNChannels()==3?GL_RGB:GL_RGBA,
-                 GL_UNSIGNED_BYTE,subimg);
+    for (int row=0; row<h; ++row) {
+      const unsigned char* src = data + ((y[i]+row)*fullW + x[i]) * nc;
+      unsigned char* dst = subimg + (row*w) * nc;
+      memcpy(dst, src, w*nc);
+    }
+    GLenum fmt = (nc==3)?GL_RGB:GL_RGBA;
+    glTexImage2D(face[i],0,fmt,w,h,0,fmt,GL_UNSIGNED_BYTE,subimg);
   }
   delete [] subimg;
   glTexParameteri(GL_TEXTURE_CUBE_MAP,GL_TEXTURE_MIN_FILTER,GL_LINEAR);

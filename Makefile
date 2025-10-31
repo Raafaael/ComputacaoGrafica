@@ -57,6 +57,7 @@ SRC = \
   src/state.cpp \
   src/grid.cpp \
   src/texture.cpp \
+  src/texcube.cpp \
   src/transform.cpp \
   src/main_3d.cpp \
 

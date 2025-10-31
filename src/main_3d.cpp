@@ -28,6 +28,7 @@
 #include "cone.h"
 #include "lamp.h"
 #include "table.h"
+#include "texcube.h"
 
 #include <iostream>
 #include <cassert>
@@ -42,13 +43,18 @@ static Camera3DPtr camera;
 static ArcballPtr arcball;
 static ShaderPtr g_shader;
 static LightPtr g_light;          // spotlight on lamp head
+// Skybox
+static ShaderPtr g_skyShader;
+static NodePtr   g_skyNode;
+static TransformPtr g_skyTrf;
+static bool g_skyLockToCamera = true; // when true, skybox follows camera translation (no parallax)
 static bool g_clipEnabled = false;    // desable clip by default
 static bool g_clipKeepAbove = true;  // for table-plane: keep ABOVE the tabletop
 static float g_topY = 1.1f;          // table top height
 // Fog controls (linear fog)
 static bool  g_fogEnabled = true;
 static float g_fogStart   = 3.0f;
-static float g_fogEnd     = 8.0f;
+static float g_fogEnd     = 12.0f;
 // Camera zoom (field of view in degrees)
 static float g_fovDeg = 30.0f; // default zoomed-in
 // Roughness visualization/control
@@ -145,18 +151,30 @@ static void initialize (void)
   shader->SetUniform("clipCount", 0);
   std::vector<glm::vec4> clipPlanes(4, glm::vec4(0,0,0,0));
   shader->SetUniform("clipPlane", clipPlanes);
+  // Environment reflection strength (default)
+  shader->SetUniform("envStrength", 0.30f);
 
   // Textures
   AppearancePtr tex_white = Texture::Make("decal", glm::vec3(1.0f,1.0f,1.0f));
   AppearancePtr tex_earth = Texture::Make("decal", "textures/earth.jpg");
   AppearancePtr tex_wood  = Texture::Make("decal", "textures/wood.jpg");
+  AppearancePtr tex_sand  = Texture::Make("decal", "textures/sand_rocks.jpg");
   AppearancePtr tex_moon  = Texture::Make("decal", "textures/moon.jpg");
   AppearancePtr tex_paper = Texture::Make("decal", "images/paper.jpg");
   AppearancePtr poly_off  = PolygonOffset::Make(-1.0f, -1.0f);
-  // Roughness maps (1x1) bound as sampler2D 'roughness'
-  AppearancePtr rough_default = Texture::Make("roughness", glm::vec3(0.8f, 0.8f, 0.8f)); // fairly rough
-  AppearancePtr rough_metal   = Texture::Make("roughness", glm::vec3(0.2f, 0.2f, 0.2f)); // glossy metal
-  AppearancePtr rough_wood    = Texture::Make("roughness", glm::vec3(0.6f, 0.6f, 0.6f)); // semi-rough wood
+  // Environment cubemap from 4x3 cross atlas
+  AppearancePtr env_cube = TexCube::Make("envMap", "images/StandardCubeMap.png");
+  // Roughness bound as sampler2D 'roughness'
+  // Default flat roughness for objects without a specific map (sphere will override)
+  AppearancePtr rough_default = Texture::Make("roughness", glm::vec3(0.8f, 0.8f, 0.8f));
+  // Fully rough (matte) for objects that should have no specular/reflection
+  AppearancePtr rough_full    = Texture::Make("roughness", glm::vec3(1.0f, 1.0f, 1.0f));
+  // Default normal map (flat): (0.5,0.5,1.0) so that sampling does nothing where no normal map is bound
+  AppearancePtr normal_default = Texture::Make("normalMap", glm::vec3(0.5f, 0.5f, 1.0f));
+  // Sand rocks normal and roughness maps for the sphere
+  AppearancePtr normal_sand = Texture::Make("normalMap", "textures/sand_rocks_normal.jpg");
+  // If a dedicated roughness exists for sand_rocks, replace below path with it; using 'rugosidade.png' for now
+  AppearancePtr rough_sand  = Texture::Make("roughness", "textures/rugosidade.png");
 
   // ---------- Scene Graph ----------
   // Table dimensions
@@ -165,9 +183,8 @@ static void initialize (void)
   // Aim the camera at the table area so arcball orbit feels natural
   camera->SetCenter(0.0f, topY, 0.0f);
   arcball = camera->CreateArcball();
-  // Build table via helper (defaults for dimensions) and wrap with wood roughness
+  // Build table via helper (defaults for dimensions) — no specific roughness map (uses default)
   NodePtr table = MakeTable(topY, mat_wood, tex_wood, cube);
-  NodePtr table_wrapped = Node::Make({ rough_wood }, { table });
 
   // Luminária via helper (versão curta, com defaults internos) e com luz acoplada ao cabeçote
   NodePtr lamp = MakeLamp(
@@ -176,14 +193,12 @@ static void initialize (void)
     /*shapes*/   cylinder,
                  cone,
     /*light*/    light);
-  // Wrap lamp with glossy metal roughness
-  NodePtr lamp_wrapped = Node::Make({ rough_metal }, { lamp });
 
-  // Ball on table (menor que o cilindro) — cor verde
+  // Ball on table (textured sand-rocks with normal + roughness maps)
   TransformPtr trf_ball = Transform::Make();
   trf_ball->Translate(+0.35f, topY + 0.1f, +0.1f);
   trf_ball->Scale(0.06f, 0.06f, 0.06f);
-  NodePtr ball = Node::Make(trf_ball, {mat_green, tex_white}, {sphere});
+  NodePtr ball = Node::Make(trf_ball, {mat_neutral, tex_sand, normal_sand, rough_sand}, {sphere});
 
   // Extra cylinder near the ball on the table
   TransformPtr trf_cyl_obj = Transform::Make();
@@ -191,6 +206,8 @@ static void initialize (void)
   trf_cyl_obj->Translate(-0.3f, topY + 0.5f*cylH, -0.05f);
   trf_cyl_obj->Scale(0.06f, cylH, 0.06f);
   NodePtr cyl_obj = Node::Make(trf_cyl_obj, {mat_orange, tex_white}, {cylinder});
+  // Make cylinder fully matte (no specular/reflection)
+  cyl_obj = Node::Make({ rough_full }, { cyl_obj });
 
   // Rectangular page lying on the table
   TransformPtr trf_page = Transform::Make();
@@ -198,15 +215,82 @@ static void initialize (void)
   trf_page->Rotate(-90.0f, 1.0f, 0.0f, 0.0f); // lay on XZ plane (normal +Y)
   trf_page->Scale(0.21f, 0.30f, 1.0f); // paper-like size (x,z), y ignored for quad
   NodePtr page = Node::Make(trf_page, {poly_off, mat_white, tex_paper}, {quad});
+  // Make paper fully matte (no specular/reflection)
+  page = Node::Make({ rough_full }, { page });
 
-  // Assemble root with shader and a default roughness (fallback)
-  NodePtr root = Node::Make(shader, { rough_default }, { table_wrapped, lamp_wrapped, ball, cyl_obj, page });
+  // Assemble root with shader and defaults (flat roughness, flat normal, env cube)
+  NodePtr root = Node::Make(shader, { rough_default, normal_default, env_cube }, { table, lamp, ball, cyl_obj, page });
   scene = Scene::Make(root);
+
+  // --- Skybox setup ---
+  // Separate shader that samples envMap and renders a cube centered at the camera
+  g_skyShader = Shader::Make(nullptr, "camera");
+  g_skyShader->AttachVertexShader("shaders/skybox/vertex.glsl");
+  g_skyShader->AttachFragmentShader("shaders/skybox/fragment.glsl");
+  g_skyShader->Link();
+  g_skyTrf = Transform::Make();
+  g_skyTrf->LoadIdentity();
+  g_skyTrf->Scale(1.0f, 1.0f, 1.0f);
+  // Skybox node: its own shader + env cube + cube mesh
+  g_skyNode = Node::Make(g_skyShader, g_skyTrf, { env_cube }, { cube });
 }
 
 static void display (GLFWwindow* win)
 { 
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear window 
+  // Draw skybox first with standard settings: depth test LEQUAL, no depth write
+  if (g_skyNode) {
+  glDepthMask(GL_FALSE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDisable(GL_CULL_FACE);
+  // Disable user clip distances for skybox to avoid accidental clipping
+#ifdef GL_CLIP_DISTANCE0
+  glDisable(GL_CLIP_DISTANCE0);
+#endif
+#ifdef GL_CLIP_DISTANCE1
+  glDisable(GL_CLIP_DISTANCE1);
+#endif
+#ifdef GL_CLIP_DISTANCE2
+  glDisable(GL_CLIP_DISTANCE2);
+#endif
+#ifdef GL_CLIP_DISTANCE3
+  glDisable(GL_CLIP_DISTANCE3);
+#endif
+    // Build skybox model transform: scale large and recenter Y; no camera translation here
+    glm::mat4 V = camera->GetViewMatrix();
+  g_skyTrf->LoadIdentity();
+    g_skyTrf->Scale(200.0f, 200.0f, 200.0f);
+  g_skyTrf->Translate(0.0f, -0.5f, 0.0f);
+  // Provide custom MVP: rotation-only view when locked to camera (no parallax), full view for world-anchored
+    glm::mat4 P = camera->GetProjMatrix();
+    glm::mat4 VrotOnly = glm::mat4(glm::mat3(V));
+    glm::mat4 SkyMVP = (g_skyLockToCamera ? (P * VrotOnly * g_skyTrf->GetMatrix())
+                                          : (P * V * g_skyTrf->GetMatrix()));
+  g_skyShader->UseProgram();
+  g_skyShader->SetUniform("SkyMVP", SkyMVP);
+    // Render only the skybox node with its own state
+    StatePtr skyState = State::Make(camera);
+    g_skyNode->Render(skyState);
+    // Restore states
+  glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+  // Restore clip distances
+#ifdef GL_CLIP_DISTANCE0
+  glEnable(GL_CLIP_DISTANCE0);
+#endif
+#ifdef GL_CLIP_DISTANCE1
+  glEnable(GL_CLIP_DISTANCE1);
+#endif
+#ifdef GL_CLIP_DISTANCE2
+  glEnable(GL_CLIP_DISTANCE2);
+#endif
+#ifdef GL_CLIP_DISTANCE3
+  glEnable(GL_CLIP_DISTANCE3);
+#endif
+  }
   // Update clipping plane (horizontal at table height) in eye space
   if (g_shader) {
     // World-space plane for y = g_topY
@@ -222,6 +306,9 @@ static void display (GLFWwindow* win)
     glm::vec4 plane_eye = invTransV * plane_world;
     // Set uniforms
     g_shader->UseProgram();
+    // Provide world up in eye space for environment reflection gating
+    glm::vec3 worldUpEye = glm::normalize(glm::mat3(V) * glm::vec3(0.0f, 1.0f, 0.0f));
+    g_shader->SetUniform("worldUpEye", worldUpEye);
     g_shader->SetUniform("clipCount", g_clipEnabled ? 1 : 0);
     std::vector<glm::vec4> planes(4, glm::vec4(0.0f));
     planes[0] = plane_eye;
@@ -281,6 +368,10 @@ static void keyboard (GLFWwindow* window, int key, int scancode, int action, int
     g_fogEnd = std::max(g_fogEnd - 0.5f, g_fogStart + 0.5f);
     UpdateFogUniforms();
     printf("Fog range: [%.2f, %.2f]\n", g_fogStart, g_fogEnd);
+  }
+  if (key == GLFW_KEY_V && action == GLFW_PRESS) {
+    g_skyLockToCamera = !g_skyLockToCamera;
+    printf("Skybox parallax %s\n", g_skyLockToCamera ? "OFF (locked to camera)" : "ON (world-anchored)");
   }
 }
 
