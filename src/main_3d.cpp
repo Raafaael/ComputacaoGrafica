@@ -49,6 +49,8 @@ static float g_topY = 1.1f;          // table top height
 static bool  g_fogEnabled = true;
 static float g_fogStart   = 3.0f;
 static float g_fogEnd     = 8.0f;
+// Camera zoom (field of view in degrees)
+static float g_fovDeg = 30.0f; // default zoomed-in
 // Roughness visualization/control
 static float g_roughFactor = 1.0f; // 1.0 = as-authored; >1 amplifies roughness, <1 reduces
 // Spotlight controls (desk lamp)
@@ -92,6 +94,8 @@ static void initialize (void)
 
   // create camera (arcball created after scene center is known)
   camera = Camera3D::Make(viewer_pos[0],viewer_pos[1],viewer_pos[2]);
+  // Set initial field of view (zoom)
+  camera->SetAngle(g_fovDeg);
 
   // Light that will be attached to the lamp head (use world space; shader uses "camera" and will convert)
   LightPtr light = Light::Make(-1.5f, 2.5f, 2.2f, 1.0f, "world");
@@ -177,20 +181,20 @@ static void initialize (void)
 
   // Ball on table (menor que o cilindro) — cor verde
   TransformPtr trf_ball = Transform::Make();
-  trf_ball->Translate(+0.35f, topY + 0.1f, -0.20f);
+  trf_ball->Translate(+0.35f, topY + 0.1f, +0.1f);
   trf_ball->Scale(0.06f, 0.06f, 0.06f);
   NodePtr ball = Node::Make(trf_ball, {mat_green, tex_white}, {sphere});
 
   // Extra cylinder near the ball on the table
   TransformPtr trf_cyl_obj = Transform::Make();
   const float cylH = 0.18f; // height after scaling
-  trf_cyl_obj->Translate(+0.10f, topY + 0.5f*cylH, -0.05f);
+  trf_cyl_obj->Translate(-0.3f, topY + 0.5f*cylH, -0.05f);
   trf_cyl_obj->Scale(0.06f, cylH, 0.06f);
   NodePtr cyl_obj = Node::Make(trf_cyl_obj, {mat_orange, tex_white}, {cylinder});
 
   // Rectangular page lying on the table
   TransformPtr trf_page = Transform::Make();
-  trf_page->Translate(-0.05f, topY + 0.04f, -0.15f);
+  trf_page->Translate(-0.25f, topY + 0.04f, -0.1f);
   trf_page->Rotate(-90.0f, 1.0f, 0.0f, 0.0f); // lay on XZ plane (normal +Y)
   trf_page->Scale(0.21f, 0.30f, 1.0f); // paper-like size (x,z), y ignored for quad
   NodePtr page = Node::Make(trf_page, {poly_off, mat_white, tex_paper}, {quad});
@@ -315,6 +319,16 @@ static void mousebutton (GLFWwindow* win, int button, int action, int mods)
     glfwSetCursorPosCallback(win, nullptr);      // callback disabled
 }
 
+// Mouse scroll: adjust camera FOV (zoom). Scroll up -> zoom in (smaller FOV).
+static void scroll (GLFWwindow* win, double xoffset, double yoffset)
+{
+  // Each notch changes FOV by 2 degrees (tweak as desired)
+  g_fovDeg = std::max(15.0f, std::min(90.0f, g_fovDeg - float(yoffset) * 2.0f));
+  if (camera) {
+    camera->SetAngle(g_fovDeg);
+  }
+}
+
 int main ()
 {
   glfwInit();
@@ -333,6 +347,7 @@ int main ()
   glfwSetFramebufferSizeCallback(win, resize);  // resize callback
   glfwSetKeyCallback(win, keyboard);            // keyboard callback
   glfwSetMouseButtonCallback(win, mousebutton); // mouse button callback
+  glfwSetScrollCallback(win, scroll);           // mouse wheel zoom callback
   
   glfwMakeContextCurrent(win);
 #ifdef _WIN32
